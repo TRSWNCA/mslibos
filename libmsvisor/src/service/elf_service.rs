@@ -28,6 +28,7 @@ use crate::{
 };
 
 use super::loader::Namespace;
+use core::arch::asm;
 
 lazy_static! {
     static ref SHOULD_NOT_SET_CONTEXT: Arc<HashSet<ServiceName>> = Arc::from({
@@ -80,7 +81,7 @@ impl ElfService {
         Ok(())
     }
 
-    fn invoke_elf_symbol(
+    extern "C" fn invoke_elf_symbol(
         &self,
         rust_main: RustMainFuncSybmol,
         args: &BTreeMap<String, String>,
@@ -93,7 +94,22 @@ impl ElfService {
         );
 
         self.metric.mark(MetricEvent::SvcRun);
-        let result = unsafe { rust_main(args) };
+        let result = unsafe {
+            let w: usize;
+            // 读取 rsp 寄存器的值
+            asm!("mov {}, rsp", out(reg) w);
+            logger::info!("service_{} rsp=0x{:x}", self.name, w);
+
+            // 修改 rsp 的值
+            asm!("mov rsp, 0x700000000000");
+
+            let res = rust_main(args);
+
+            // 从变量 w 中复原 rsp 寄存器的值
+            asm!("mov rsp, {}", in(reg) w);
+
+            res
+        };
         self.metric.mark(MetricEvent::SvcEnd);
 
         logger::info!("{} complete.", self.name);
