@@ -99,37 +99,23 @@ impl ElfService {
         let rust_main: RustMainFunc = unsafe { transmute(*rust_main as usize ) };
         self.metric.mark(MetricEvent::SvcRun);
 
-        // 为用户栈分配空间，设置为系统默认limit 8MB
-        let user_stack = unsafe {
-            mman::mmap_anonymous(
-                None,
-                NonZeroUsize::new(8 * 1024 * 1024).ok_or("zero user stack size?")?,
-                mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
-                mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_STACK,
-            )
-            .map_err(|e| format!("mmap_anonymous failed: {:?}", e))?
-        };
-        unsafe {
-            mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_NONE)
-            .map_err(|e| format!("mprotect failed: {:?}", e))?;
-        }
         let result = unsafe {
-            let w: usize;
+            // let w: usize;
             // 读取 rsp 寄存器的值
-            asm!("mov {}, rsp", out(reg) w);
-            logger::info!("service_{} rsp=0x{:x}", self.name, w);
+            // asm!("mov {}, rsp", out(reg) w);
+            // logger::info!("service_{} rsp=0x{:x}", self.name, w);
 
-            let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
-            let user_stack_top: usize = user_stack_top as usize;
-            logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
+            // let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
+            // let user_stack_top: usize = user_stack_top as usize;
+            // logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
 
             // 修改 rsp 的值
-            asm!("mov rsp, {}", in(reg) user_stack_top);
+            // asm!("mov rsp, {}", in(reg) user_stack_top);
 
             let res = rust_main(args);
 
             // 从变量 w 中复原 rsp 寄存器的值
-            asm!("mov rsp, {}", in(reg) w);
+            // asm!("mov rsp, {}", in(reg) w);
             res
         };
         self.metric.mark(MetricEvent::SvcEnd);
