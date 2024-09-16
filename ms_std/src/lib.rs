@@ -62,7 +62,7 @@ pub fn main(_: BTreeMap<String, String>) -> FaaSFuncResult<()> {
 }
 
 #[no_mangle]
-pub fn rust_main(args: BTreeMap<String, String>) -> Result<(), String> {
+pub extern "C" fn rust_main(args: BTreeMap<String, String>) /* -> Result<(), String>*/ {
     #[cfg(feature = "unwinding")]
     {
         let result = unwinding::panic::catch_unwind(|| main(args));
@@ -70,7 +70,7 @@ pub fn rust_main(args: BTreeMap<String, String>) -> Result<(), String> {
         match result {
             Ok(func_res) => {
                 if let Err(e) = func_res {
-                    Err(alloc::format!("function exec error: {}", e.msg()))?;
+                    Err(alloc::format!("function exec error: {}", e.msg()));
                 }
             }
             Err(e) => {
@@ -84,8 +84,7 @@ pub fn rust_main(args: BTreeMap<String, String>) -> Result<(), String> {
         let result = main(args);
 
         if let Err(e) = result {
-            Err(alloc::format!("function exec error: {}", e.msg()))?
-        };
+        }
     }
-    Ok(())
+    // Ok(())
 }

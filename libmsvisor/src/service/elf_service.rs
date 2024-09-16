@@ -34,6 +34,8 @@ use core::arch::asm;
 use ms_hostcall::types::RustMainFunc;
 use std::num::NonZeroUsize;
 
+use core::result;
+
 lazy_static! {
     static ref SHOULD_NOT_SET_CONTEXT: Arc<HashSet<ServiceName>> = Arc::from({
         let mut hs = HashSet::new();
@@ -99,34 +101,50 @@ impl ElfService {
         let rust_main: RustMainFunc = unsafe { transmute(*rust_main as usize ) };
         self.metric.mark(MetricEvent::SvcRun);
 
-        let result = unsafe {
-            // let w: usize;
-            // 读取 rsp 寄存器的值
-            // asm!("mov {}, rsp", out(reg) w);
-            // logger::info!("service_{} rsp=0x{:x}", self.name, w);
+        // 为用户栈分配空间，设置为系统默认limit 8MB
+        let user_stack = unsafe {
+            mman::mmap_anonymous(
+                None,
+                NonZeroUsize::new(8 * 1024 * 1024).ok_or("zero user stack size?")?,
+                mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
+                mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_STACK,
+            )
+            .map_err(|e| format!("mmap_anonymous failed: {:?}", e))?
+        };
+        unsafe {
+            mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_NONE)
+            .map_err(|e| format!("mprotect failed: {:?}", e))?;
+        }
+        let mut w: usize;
 
-            // let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
-            // let user_stack_top: usize = user_stack_top as usize;
-            // logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
+        unsafe {
+            // 读取 rsp 寄存器的值
+            asm!("mov {}, rsp", out(reg) w);
+            logger::info!("service_{} rsp=0x{:x}", self.name, w);
+
+            let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
+            let user_stack_top = user_stack_top as usize;
+            logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
 
             // 修改 rsp 的值
-            // asm!("mov rsp, {}", in(reg) user_stack_top);
+            asm!("mov rsp, {}", in(reg) user_stack_top);
+            // let mut res: Result<(), String> = core::result::Result::Ok(()); //.map_err(|e| e.to_string());
 
-            let res = rust_main(args);
-
-            // 从变量 w 中复原 rsp 寄存器的值
-            // asm!("mov rsp, {}", in(reg) w);
-            res
+            rust_main(args);
+            asm!("mov rsp, {}", in(reg) w);
         };
+        // 从变量 w 中复原 rsp 寄存器的值
         self.metric.mark(MetricEvent::SvcEnd);
 
         logger::info!("{} complete.", self.name);
-        result.map_err(|e| {
-            let err_msg = format!("function {} run failed: {}", self.name, e);
-            // forget because String refer to heap of libos modules.
-            forget(e);
-            err_msg
-        })
+        // result.map_err(|e| {
+        //     let err_msg = format!("function {} run failed: {}", self.name, e);
+        //     // forget because String refer to heap of libos modules.
+        //     forget(e);
+        //     err_msg
+        // })
+        
+        result::Result::Ok(())
     }
 
     pub fn run(&self, args: &BTreeMap<String, String>) -> Result<(), String> {

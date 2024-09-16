@@ -13,8 +13,8 @@ cfg_if::cfg_if! {
 
 #[no_mangle]
 pub fn main(args: &BTreeMap<String, String>) -> Result<()> {
-    println!("Hello, world! id: {}", args["id"]);
-
+    println!("Hello, world! id: {}" , 1111// args["id"]);
+    );
     #[cfg(feature = "measure_mem")]
     {
         use ms_std::libos::MetricEvent::Mem;
