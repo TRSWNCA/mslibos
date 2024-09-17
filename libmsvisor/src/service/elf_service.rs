@@ -111,29 +111,25 @@ impl ElfService {
             )
             .map_err(|e| format!("mmap_anonymous failed: {:?}", e))?
         };
-        unsafe {
+        let user_stack_top: u64 = unsafe {
             mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_NONE)
             .map_err(|e| format!("mprotect failed: {:?}", e))?;
-        }
-        let mut w: usize;
+            let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
+            user_stack_top as u64
+        };
 
         unsafe {
-            // 读取 rsp 寄存器的值
-            asm!("mov {}, rsp", out(reg) w);
-            logger::info!("service_{} rsp=0x{:x}", self.name, w);
-
-            let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
-            let user_stack_top = user_stack_top as usize;
-            logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
-
-            // 修改 rsp 的值
-            asm!("mov rsp, {}", in(reg) user_stack_top);
-            // let mut res: Result<(), String> = core::result::Result::Ok(()); //.map_err(|e| e.to_string());
+            // 把旧栈的 rsp 压入新栈，并修改 rsp 的值到新栈
+            asm!("mov [{user_rsp}+8], rsp",
+                 "mov rsp, {user_rsp}",
+                user_rsp = in(reg) (user_stack_top-16));
 
             rust_main(args);
-            asm!("mov rsp, {}", in(reg) w);
+            // 复原 rsp 寄存器的值
+            asm!("mov rsp, [rsp+8]");
         };
-        // 从变量 w 中复原 rsp 寄存器的值
+        logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
+
         self.metric.mark(MetricEvent::SvcEnd);
 
         logger::info!("{} complete.", self.name);
@@ -143,7 +139,7 @@ impl ElfService {
         //     forget(e);
         //     err_msg
         // })
-        
+
         result::Result::Ok(())
     }
 
