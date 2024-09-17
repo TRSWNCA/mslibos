@@ -70,12 +70,12 @@ pub extern "C" fn rust_main(args: BTreeMap<String, String>) /* -> Result<(), Str
         match result {
             Ok(func_res) => {
                 if let Err(e) = func_res {
-                    Err(alloc::format!("function exec error: {}", e.msg()));
+                    // Err(alloc::format!("function exec error: {}", e.msg()));
                 }
             }
             Err(e) => {
                 core::mem::forget(e);
-                Err(alloc::format!("catch user function panic."))?;
+                // Err(alloc::format!("catch user function panic."))?;
             }
         }
     }
