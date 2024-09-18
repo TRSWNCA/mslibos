@@ -22,6 +22,7 @@ use nix::libc::{sleep, RTLD_DI_LMID};
 use nix::libc;
 use nix::sys::mman;
 use thiserror::Error;
+use nix::libc::{size_t, syscall, SYS_pkey_alloc, SYS_pkey_mprotect};
 
 use crate::{
     isolation::handler::{find_host_call, panic_handler},
@@ -105,7 +106,7 @@ impl ElfService {
         let rust_main: RustMainFunc = unsafe { transmute(*rust_main as usize ) };
         self.metric.mark(MetricEvent::SvcRun);
 
-        #[cfg(not(feature = "disable_mpk"))] {
+        #[cfg(feature = "enable_mpk")] {
             // 为用户栈分配空间，设置为系统默认limit 8MB
             let user_stack = unsafe {
                 mman::mmap_anonymous(
@@ -123,11 +124,7 @@ impl ElfService {
                 user_stack_top as u64
             };
 
-            let pkey_func = mpk::pkey_alloc();
-            println!("get pkey: {}", pkey_func);
-
             let lib_name = "/home/cyc/mslibos/user/hello_world/target/debug/libhello_world.so";
-            let lib = unsafe { libloading::Library::new(lib_name) }.unwrap();
 
             let maps_str = fs::read_to_string("/proc/self/maps").unwrap();
             let segments = utils::parse_memory_segments(&maps_str).unwrap();
@@ -135,41 +132,49 @@ impl ElfService {
             for segment in segments {
                 if segment.clone().path.is_some_and(|seg| needs.contains(&seg)) {
                     println!("{:x?}", segment);
-                    if mpk::pkey_mprotect(
-                        segment.start_addr as *mut c_void,
-                        segment.length,
-                        segment.perm,
-                        pkey_func,
-                    ).is_err() {
-                        logger::error!("map {:?} failed", segment.path);
-                    }
+                    mpk::pkey_mprotect(segment.start_addr as *mut c_void, segment.length, segment.perm, 0x1).unwrap();
                 }
             }
 
-            mpk::pkey_mprotect(user_stack.as_ptr() as *mut c_void, 8 * 1024 * 1024, libc::PROT_READ | libc::PROT_WRITE, pkey_func).unwrap();
-            // mpk::pkey_mprotect(self.namespace().con, len, prot, pkey)
+            mpk::pkey_mprotect(user_stack.as_ptr() as *mut c_void, 8 * 1024 * 1024, libc::PROT_READ | libc::PROT_WRITE, 0x1).unwrap();
 
             // 开启函数分区的权限
-            mpk::pkey_set(pkey_func, 0).unwrap();
+            mpk::pkey_set(0x1, 0); //.unwrap();
+            // println!("pkru after open: {:x}", mpk::pkey_read());
             // 关闭非函数部分的权限
-            mpk::pkey_set(0, 3).unwrap();
-            let pkru = mpk::pkey_read();
+            // mpk::pkey_set(0, 3); //.unwrap();
+
+
 
             unsafe {
                 // 把旧栈的 rsp 压入新栈，并修改 rsp 的值到新栈
-                asm!("mov [{user_rsp}+8], rsp",
+                asm!(
+                    "mov r11, {rust_main}",
+                    "mov [{user_rsp}+8], rsp",
                     "mov rsp, {user_rsp}",
-                    user_rsp = in(reg) (user_stack_top-16));
+                    "mov eax, 0x55555553",
+                    "xor rcx, rcx",
+                    "mov rdx, rcx",
+                    "wrpkru",
+                    "call r11",
+                    user_rsp = in(reg) (user_stack_top-16),
+                    in("rdi") args,
+                    rust_main = in(reg) rust_main,
+                );
 
-                rust_main(args);
                 // 复原 rsp 寄存器的值
                 asm!("mov rsp, [rsp+8]");
+                // 释放 protect
+                asm!(
+                    "wrpkru",
+                    in("rax") 0x55555550,
+                    in("rcx") 0,
+                    in("rdx") 0,
+                )
             };
-            mpk::pkey_write(0);
-            println!("pkru: {:b}", pkru);
         }
 
-        #[cfg(feature = "disable_mpk")] {
+        #[cfg(not(feature = "enable_mpk"))] {
             unsafe { rust_main(args); }
         }
 
@@ -296,13 +301,15 @@ impl WithLibOSService {
         }
 
         // 为 Heap 设置 MPK 保护
-        #[cfg(not(feature = "disable_mpk"))] {
+        #[cfg(feature = "enable_mpk")] {
+            let _ = mpk::pkey_alloc();
+            /* unsafe { libc::syscall(SYS_pkey_alloc, 0, 0); }; */
             mpk::pkey_mprotect(
                 heap_start as *mut c_void,
                 SERVICE_HEAP_SIZE,
                 libc::PROT_READ | libc::PROT_WRITE,
                 1
-            );
+            ).unwrap();
         }
 
         Ok(())
