@@ -6,6 +6,7 @@ use std::{
     ffi::c_void,
     mem::{forget, transmute, MaybeUninit},
     sync::Arc,
+    fs,
 };
 
 use anyhow::Ok;
@@ -17,7 +18,8 @@ use ms_hostcall::{
     types::{DropHandlerFunc, IsolationID, MetricEvent, ServiceName},
     IsolationContext, SERVICE_HEAP_SIZE,
 };
-use nix::libc::RTLD_DI_LMID;
+use nix::libc::{sleep, RTLD_DI_LMID};
+use nix::libc;
 use nix::sys::mman;
 use thiserror::Error;
 
@@ -26,6 +28,8 @@ use crate::{
     logger,
     metric::SvcMetricBucket,
     GetHandlerFuncSybmol, RustMainFuncSybmol, SetHandlerFuncSybmol,
+    mpk,
+    utils,
 };
 
 use super::loader::Namespace;
@@ -101,34 +105,73 @@ impl ElfService {
         let rust_main: RustMainFunc = unsafe { transmute(*rust_main as usize ) };
         self.metric.mark(MetricEvent::SvcRun);
 
-        // 为用户栈分配空间，设置为系统默认limit 8MB
-        let user_stack = unsafe {
-            mman::mmap_anonymous(
-                None,
-                NonZeroUsize::new(8 * 1024 * 1024).ok_or("zero user stack size?")?,
-                mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
-                mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_STACK,
-            )
-            .map_err(|e| format!("mmap_anonymous failed: {:?}", e))?
-        };
-        let user_stack_top: u64 = unsafe {
-            mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_NONE)
-            .map_err(|e| format!("mprotect failed: {:?}", e))?;
-            let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
-            user_stack_top as u64
-        };
+        #[cfg(not(feature = "disable_mpk"))] {
+            // 为用户栈分配空间，设置为系统默认limit 8MB
+            let user_stack = unsafe {
+                mman::mmap_anonymous(
+                    None,
+                    NonZeroUsize::new(8 * 1024 * 1024).ok_or("zero user stack size?")?,
+                    mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
+                    mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_STACK,
+                )
+                .map_err(|e| format!("mmap_anonymous failed: {:?}", e))?
+            };
+            let user_stack_top: u64 = unsafe {
+                mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_NONE)
+                .map_err(|e| format!("mprotect failed: {:?}", e))?;
+                let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
+                user_stack_top as u64
+            };
 
-        unsafe {
-            // 把旧栈的 rsp 压入新栈，并修改 rsp 的值到新栈
-            asm!("mov [{user_rsp}+8], rsp",
-                 "mov rsp, {user_rsp}",
-                user_rsp = in(reg) (user_stack_top-16));
+            let pkey_func = mpk::pkey_alloc();
+            println!("get pkey: {}", pkey_func);
 
-            rust_main(args);
-            // 复原 rsp 寄存器的值
-            asm!("mov rsp, [rsp+8]");
-        };
-        logger::info!("service_{} user_stack_top=0x{:x}", self.name, user_stack_top);
+            let lib_name = "/home/cyc/mslibos/user/hello_world/target/debug/libhello_world.so";
+            let lib = unsafe { libloading::Library::new(lib_name) }.unwrap();
+
+            let maps_str = fs::read_to_string("/proc/self/maps").unwrap();
+            let segments = utils::parse_memory_segments(&maps_str).unwrap();
+            let needs = [lib_name.to_owned()];
+            for segment in segments {
+                if segment.clone().path.is_some_and(|seg| needs.contains(&seg)) {
+                    println!("{:x?}", segment);
+                    if mpk::pkey_mprotect(
+                        segment.start_addr as *mut c_void,
+                        segment.length,
+                        segment.perm,
+                        pkey_func,
+                    ).is_err() {
+                        logger::error!("map {:?} failed", segment.path);
+                    }
+                }
+            }
+
+            mpk::pkey_mprotect(user_stack.as_ptr() as *mut c_void, 8 * 1024 * 1024, libc::PROT_READ | libc::PROT_WRITE, pkey_func).unwrap();
+            // mpk::pkey_mprotect(self.namespace().con, len, prot, pkey)
+
+            // 开启函数分区的权限
+            mpk::pkey_set(pkey_func, 0).unwrap();
+            // 关闭非函数部分的权限
+            mpk::pkey_set(0, 3).unwrap();
+            let pkru = mpk::pkey_read();
+
+            unsafe {
+                // 把旧栈的 rsp 压入新栈，并修改 rsp 的值到新栈
+                asm!("mov [{user_rsp}+8], rsp",
+                    "mov rsp, {user_rsp}",
+                    user_rsp = in(reg) (user_stack_top-16));
+
+                rust_main(args);
+                // 复原 rsp 寄存器的值
+                asm!("mov rsp, [rsp+8]");
+            };
+            mpk::pkey_write(0);
+            println!("pkru: {:b}", pkru);
+        }
+
+        #[cfg(feature = "disable_mpk")] {
+            unsafe { rust_main(args); }
+        }
 
         self.metric.mark(MetricEvent::SvcEnd);
 
@@ -250,6 +293,16 @@ impl WithLibOSService {
 
         if unsafe { get_handler() } != find_host_call as usize {
             Err(ServiceInitError::CtxCheckFailed)?
+        }
+
+        // 为 Heap 设置 MPK 保护
+        #[cfg(not(feature = "disable_mpk"))] {
+            mpk::pkey_mprotect(
+                heap_start as *mut c_void,
+                SERVICE_HEAP_SIZE,
+                libc::PROT_READ | libc::PROT_WRITE,
+                1
+            );
         }
 
         Ok(())

@@ -26,5 +26,6 @@ thiserror = "1.0.56"
 [features]
 namespace = []
 serviceV2 = ["nix/mman"]
+disable_mpk = []
 
-default = ["namespace"]
+default = ["namespace", "disable_mpk"]
