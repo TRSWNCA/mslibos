@@ -118,8 +118,8 @@ impl ElfService {
                 .map_err(|e| format!("mmap_anonymous failed: {:?}", e))?
             };
             let user_stack_top: u64 = unsafe {
-                mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_NONE)
-                .map_err(|e| format!("mprotect failed: {:?}", e))?;
+                mman::mprotect(user_stack, 4 * 1024, mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE)
+                .map_err(|e| format!("mprotect failed: {:?}", e))?; 
                 let user_stack_top = unsafe { user_stack.as_ptr().add(8 * 1024 * 1024) };
                 user_stack_top as u64
             };
@@ -139,7 +139,7 @@ impl ElfService {
             mpk::pkey_mprotect(user_stack.as_ptr() as *mut c_void, 8 * 1024 * 1024, libc::PROT_READ | libc::PROT_WRITE, 0x1).unwrap();
 
             // 开启函数分区的权限
-            mpk::pkey_set(0x1, 0); //.unwrap();
+            mpk::pkey_set(0x1, 0).unwrap();
             // println!("pkru after open: {:x}", mpk::pkey_read());
             // 关闭非函数部分的权限
             // mpk::pkey_set(0, 3); //.unwrap();
@@ -147,12 +147,13 @@ impl ElfService {
 
 
             unsafe {
+                // sleep(1000);
                 // 把旧栈的 rsp 压入新栈，并修改 rsp 的值到新栈
                 asm!(
                     "mov r11, {rust_main}",
                     "mov [{user_rsp}+8], rsp",
                     "mov rsp, {user_rsp}",
-                    "mov eax, 0x55555553",
+                    "mov eax, 0x3",
                     "xor rcx, rcx",
                     "mov rdx, rcx",
                     "wrpkru",

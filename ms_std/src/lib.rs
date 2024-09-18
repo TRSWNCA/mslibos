@@ -81,10 +81,13 @@ pub extern "C" fn rust_main(args: BTreeMap<String, String>) /* -> Result<(), Str
     }
     #[cfg(not(feature = "unwinding"))]
     {
+        // println!("rust_main success");
+        /*
         let result = main(args);
 
         if let Err(e) = result {
         }
+        */
     }
     // Ok(())
 }
