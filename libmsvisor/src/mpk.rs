@@ -1,13 +1,10 @@
-use core::slice;
 use std::{
-    alloc::{self, Layout},
     arch::asm,
     ffi::c_void,
 };
 
 use nix::errno::errno;
 use nix::libc::{size_t, syscall, SYS_pkey_alloc, SYS_pkey_mprotect};
-use nix::libc;
 
 pub fn pkey_alloc() -> i32 {
     unsafe { syscall(SYS_pkey_alloc, 0, 0) as i32 }

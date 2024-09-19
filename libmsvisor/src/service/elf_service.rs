@@ -131,7 +131,6 @@ impl ElfService {
             let needs = [lib_name.to_owned()];
             for segment in segments {
                 if segment.clone().path.is_some_and(|seg| needs.contains(&seg)) {
-                    println!("{:x?}", segment);
                     mpk::pkey_mprotect(segment.start_addr as *mut c_void, segment.length, segment.perm, 0x1).unwrap();
                     logger::info!("{} (0x{:x}, 0x{:x}) set mpk success with right {:?}.", segment.path.unwrap(), segment.start_addr, segment.start_addr + segment.length, segment.perm);
                 }
@@ -142,11 +141,9 @@ impl ElfService {
 
             // 开启函数分区的权限
             mpk::pkey_set(0x1, 0).unwrap();
-            // println!("pkru after open: {:x}", mpk::pkey_read());
-            // 关闭非函数部分的权限
-            // mpk::pkey_set(0, 3); //.unwrap();
-
-
+            logger::info!("pkey value : {:x}", mpk::pkey_read());
+            // mpk::pkey_set(0, 0).unwrap();
+            // logger::info!("pkey value : {:x}", mpk::pkey_read());
 
             unsafe {
                 // sleep(1000);
@@ -155,7 +152,7 @@ impl ElfService {
                     "mov r11, {rust_main}",
                     "mov [{user_rsp}+8], rsp",
                     "mov rsp, {user_rsp}",
-                    "mov eax, 0x3",
+                    "mov eax, 0x55555553",
                     "xor rcx, rcx",
                     "mov rdx, rcx",
                     "wrpkru",
@@ -168,12 +165,6 @@ impl ElfService {
                 // 复原 rsp 寄存器的值
                 asm!("mov rsp, [rsp+8]");
                 // 释放 protect
-                asm!(
-                    "wrpkru",
-                    in("rax") 0x55555550,
-                    in("rcx") 0,
-                    in("rdx") 0,
-                )
             };
         }
 
