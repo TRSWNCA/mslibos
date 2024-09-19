@@ -11,6 +11,7 @@
 
 use agent::FaaSFuncResult;
 use alloc::{collections::BTreeMap, string::String};
+use core::arch::asm;
 
 pub mod agent;
 pub mod console;
@@ -57,15 +58,21 @@ cfg_if::cfg_if! {
 
 #[linkage = "weak"]
 #[no_mangle]
-pub fn main(_: BTreeMap<String, String>) -> FaaSFuncResult<()> {
+pub fn main() -> FaaSFuncResult<()> {
     panic!("need real main");
 }
 
 #[no_mangle]
-pub extern "C" fn rust_main(args: BTreeMap<String, String>) /* -> Result<(), String>*/ {
+pub extern "C" fn rust_main() /* -> Result<(), String>*/ {
+    unsafe {
+        asm!( "mov eax, 0x3",
+        "xor rcx, rcx",
+        "mov rdx, rcx",
+       "wrpkru");
+    }
     #[cfg(feature = "unwinding")]
     {
-        let result = unwinding::panic::catch_unwind(|| main(args));
+        let result = unwinding::panic::catch_unwind(|| main());
 
         match result {
             Ok(func_res) => {
@@ -88,6 +95,14 @@ pub extern "C" fn rust_main(args: BTreeMap<String, String>) /* -> Result<(), Str
         if let Err(e) = result {
         }
         */
+    }
+    unsafe {
+        asm!(
+            "wrpkru",
+            in("rax") 0x55555550,
+            in("rcx") 0,
+            in("rdx") 0,
+        );
     }
     // Ok(())
 }

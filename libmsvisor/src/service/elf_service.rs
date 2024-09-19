@@ -131,7 +131,6 @@ impl ElfService {
             let needs = [lib_name.to_owned()];
             for segment in segments {
                 if segment.clone().path.is_some_and(|seg| needs.contains(&seg)) {
-                    println!("{:x?}", segment);
                     mpk::pkey_mprotect(segment.start_addr as *mut c_void, segment.length, segment.perm, 0x1).unwrap();
                     logger::info!("{} (0x{:x}, 0x{:x}) set mpk success with right {:?}.", segment.path.unwrap(), segment.start_addr, segment.start_addr + segment.length, segment.perm);
                 }
@@ -158,7 +157,7 @@ impl ElfService {
                     "mov eax, 0x3",
                     "xor rcx, rcx",
                     "mov rdx, rcx",
-                    "wrpkru",
+                    // "wrpkru",
                     "call r11",
                     user_rsp = in(reg) (user_stack_top-16),
                     in("rdi") args,
