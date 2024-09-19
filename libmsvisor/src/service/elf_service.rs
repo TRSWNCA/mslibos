@@ -124,7 +124,7 @@ impl ElfService {
                 user_stack_top as u64
             };
 
-            let lib_name = "/home/cyc/mslibos/user/hello_world/target/debug/libhello_world.so";
+            let lib_name = "/home/cyc/projects/mslibos/user/hello_world/target/debug/libhello_world.so";
 
             let maps_str = fs::read_to_string("/proc/self/maps").unwrap();
             let segments = utils::parse_memory_segments(&maps_str).unwrap();
@@ -133,10 +133,12 @@ impl ElfService {
                 if segment.clone().path.is_some_and(|seg| needs.contains(&seg)) {
                     println!("{:x?}", segment);
                     mpk::pkey_mprotect(segment.start_addr as *mut c_void, segment.length, segment.perm, 0x1).unwrap();
+                    logger::info!("{} (0x{:x}, 0x{:x}) set mpk success with right {:?}.", segment.path.unwrap(), segment.start_addr, segment.start_addr + segment.length, segment.perm);
                 }
             }
 
             mpk::pkey_mprotect(user_stack.as_ptr() as *mut c_void, 8 * 1024 * 1024, libc::PROT_READ | libc::PROT_WRITE, 0x1).unwrap();
+            logger::info!("user stack (0x{:x}, 0x{:x}) set mpk success with right {:?}.", user_stack.as_ptr() as usize, user_stack_top, libc::PROT_READ | libc::PROT_WRITE);
 
             // 开启函数分区的权限
             mpk::pkey_set(0x1, 0).unwrap();
@@ -311,6 +313,7 @@ impl WithLibOSService {
                 libc::PROT_READ | libc::PROT_WRITE,
                 1
             ).unwrap();
+            logger::info!("heap segement (0x{:x}, 0x{:x}) set mpk success with right {:?}.", heap_start, heap_start + SERVICE_HEAP_SIZE, libc::PROT_READ | libc::PROT_WRITE);
         }
 
         Ok(())
