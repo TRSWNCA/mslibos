@@ -32,7 +32,6 @@ pub fn main() -> Result<()> {
 
     let mut counter: HashMap<String, u32> = HashMap::new();
     for i in 0..mapper_num {
-        // println!("need databuffer slot={}-{}", i, reducer_id);
         let mapper_result: DataBuffer<Mapper2Reducer> =
             DataBuffer::from_buffer_slot(format!("{}-{}", i, reducer_id))
                 .unwrap_or_else(|| panic!("missing mapper result? mapper_id={}", i.to_string()));
@@ -43,9 +42,6 @@ pub fn main() -> Result<()> {
         }
     }
 
-    // for (word, count) in counter {
-    //     println!("{}:{}", word, count);
-    // }
     println!("reducer{} has counted {} words", my_id, counter.len());
 
     Ok(().into())

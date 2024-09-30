@@ -30,6 +30,15 @@ impl Default for Mapper2Reducer {
     }
 }
 
+pub fn getidx(word: &str, reducer_num: u64) -> u64 {
+    let mut hash_val: u64 = 0;
+    for c in word.chars() {
+        hash_val = hash_val * 31 + c as u64;
+        hash_val = hash_val % reducer_num;
+    }
+    hash_val
+}
+
 #[allow(clippy::result_unit_err)]
 #[no_mangle]
 pub fn main() -> Result<()> {
@@ -68,12 +77,7 @@ pub fn main() -> Result<()> {
 
     ms_std::println!("the counter nums is {}", counter.len());
     for (word, count) in counter {
-        // let shuffle_idx = {
-        //     let mut hasher = hashbrown::hash_map::DefaultHashBuilder::default().build_hasher();
-        //     word.hash(&mut hasher);
-        //     hasher.finish() % reducer_num
-        // };
-        let shuffle_idx = 0;
+        let shuffle_idx = getidx(word, reducer_num);
 
         data_buffers
             .get_mut(shuffle_idx as usize)
