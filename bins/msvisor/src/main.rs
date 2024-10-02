@@ -83,6 +83,9 @@ fn msvisor_start(isol: &Arc<Isolation>) {
     let isol = get_isol(isol.id).expect("isol don't exist?");
 
     if let Err(e) = isol.run() {
+        // if in debug mod, error will lead to exit.
+        #[cfg(debug_assertions)]
+        panic!("isol{} run failed. err={e:?}", isol.id);
         log::error!("isol{} run failed. err={e:?}", isol.id)
     }
 }
